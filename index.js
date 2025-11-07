@@ -22,9 +22,14 @@ import { readFileSync, writeFileSync } from 'fs';
 // Import fetch for API calls
 import fetch from 'node-fetch';
 
+console.log('🔧 Environment Check:');
+console.log('   RECIPIENT_ADDRESS:', process.env.RECIPIENT_ADDRESS ? '✓ Loaded' : '✗ Missing');
+console.log('   TRANSFER_MEMO:', process.env.TRANSFER_MEMO ? '✓ Loaded' : '✗ Missing');
+console.log('   HIRO_API_KEY:', process.env.HIRO_API_KEY ? '✓ Loaded' : '✗ Missing');
+
 // Get configuration from environment variables
 const RECIPIENT = process.env.RECIPIENT_ADDRESS;       // Destination STX address
-const MEMO = process.env.TRANSFER_MEMO || '102687864'; // Transaction memo/note
+const MEMO = process.env.TRANSFER_MEMO || '10192739'; // Transaction memo/note
 const API_KEY = process.env.HIRO_API_KEY;              // Hiro API key for rate limiting
 
 // Configure network with API key (using mainnet for production)
@@ -216,7 +221,7 @@ async function processAllWallets() {
       // Add a small delay between transactions to avoid rate limiting
       if (i < walletsData.length - 1) {
         console.log('⏳ Waiting 2 seconds before next wallet...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await new Promise(resolve => setTimeout(resolve, 5000));
       }
     } catch (error) {
       console.error(`❌ Failed to process wallet ${walletsData[i].name}:`, error.message);
@@ -331,6 +336,66 @@ async function processAllWallets() {
   console.log(`\n✅ Completed processing all ${walletsData.length} wallets!`);
 }
 
+/**
+ * Function to check balances of all wallets and sum totals for each owner
+ * Also shows the grand total balance for all owners/names
+ */
+async function checkWalletBalances() {
+  console.log(`\n🔎 Checking wallet balances and summing totals by owner...`);
+  const ownerTotals = {};
+  let grandTotal = BigInt(0);
+
+  for (let i = 0; i < walletsData.length; i++) {
+    const walletData = walletsData[i];
+
+    // Generate wallet from mnemonic phrase
+    const wallet = await generateWallet({
+      secretKey: walletData.privateKey,
+      password: ''
+    });
+
+    const PRIVATE_KEY = wallet.accounts[0].stxPrivateKey;
+    const senderAddress = getAddressFromPrivateKey(PRIVATE_KEY, TransactionVersion.Mainnet);
+
+    // Fetch current STX balance
+    const headers = {};
+    if (API_KEY) {
+      headers['Authorization'] = `Bearer ${API_KEY}`;
+    }
+    const response = await fetch(`${NETWORK.coreApiUrl}/extended/v1/address/${senderAddress}/balances`, {
+      headers: headers
+    });
+    const accountInfo = await response.json();
+    const currentBalance = BigInt(accountInfo.stx.balance);
+
+    // Sum totals by owner (using walletData.name if owner is missing)
+    const ownerKey = walletData.name 
+    if (!ownerTotals[ownerKey]) {
+      ownerTotals[ownerKey] = {
+        owner: ownerKey,
+        totalBalance: BigInt(0),
+        walletCount: 0
+      };
+    }
+    ownerTotals[ownerKey].totalBalance += currentBalance;
+    ownerTotals[ownerKey].walletCount += 1;
+
+    grandTotal += currentBalance;
+
+    console.log(`🧑 Wallet: ${walletData.name || ownerKey} | Balance: ${Number(currentBalance) / 1000000} STX`);
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+  }
+
+  console.log(`\n📊 TOTALS BY OWNER:`);
+  Object.values(ownerTotals).forEach(owner => {
+    console.log(`👤 Owner: ${owner.owner} | Total Balance: ${Number(owner.totalBalance) / 1000000} STX | Wallets: ${owner.walletCount}`);
+  });
+
+  console.log(`\n💰 GRAND TOTAL BALANCE FOR ALL OWNERS: ${Number(grandTotal) / 1000000} STX`);
+}
+
 // Execute the main function
 // This will automatically run when the script is executed with 'node index.js'
 processAllWallets();
+checkWalletBalances();  // Uncomment this line to run balance check function
